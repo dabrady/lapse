@@ -31,7 +31,8 @@ function WaitFor() {
 }
 
 function GenerateFileHistory() {
-    git log --follow --format=format:%h --name-only $TARGET_REVISION_RANGE -- $TARGET_FILE | gsed -r '/^\s*$/d' > $HISTORY
+    # TODO Use '--name-status' instead of '--name-only' and add some parsing to handle file renames
+    git log --follow --format=format:%h --name-only $TARGET_REVISION_RANGE -- $TARGET_FILE | tail -r | gsed -r '/^\s*$/d' > $HISTORY
 }
 
 function ClearFileHistory() {
@@ -41,7 +42,7 @@ function ClearFileHistory() {
 function GetMaxLines() {
     [ -e "$HISTORY" ] || (echo "no history yet" && exit 1)
     max=0
-    while read sha filename; do
+    while read filename sha; do
         # File renames result in a commit that touched the file, but in a file that no longer
         # exists on that commit -_-; they also result in a new file that we need to start tracking.
         # Gotta guard against it.
@@ -50,7 +51,7 @@ function GetMaxLines() {
         if [ "$cur" -gt "$max" ]; then
             max=$cur
         fi
-    done <<< "$( cat "$HISTORY" | xargs -n2)"
+    done <<< "$(cat "$HISTORY" | xargs -n2)"
 
     echo $max
 }
@@ -101,6 +102,31 @@ END
     set +f
 }
 
+function ReplayHistory() {
+    # Used to keep track of file renames
+    local previousFilename=
+    while read file sha; do
+        # TODO Figure out a way to handle file renames. Something like this:
+
+        # If we come across a commit in our file history that doesn't actually
+        # contain the file, either we fucked up our history gathering, or the
+        # file was renamed in this commit.
+        # if [[ -e "$file" ]]; then
+            git checkout $sha $file
+        # else
+        #     git checkout $sha $previousFilename
+        # fi
+
+        previousFilename="$file"
+    done <<< "$(cat "$HISTORY" | xargs -n2)"
+
+    # Give the user a bit of time to breathe at the end before resetting.
+    sleep 2
+
+    git checkout master
+    git reset --hard origin/master
+}
+
 echo -n "Generating file history "
 MakeTheUserWait &
 GenerateFileHistory && { kill %1 && wait %1; } 2>/dev/null
@@ -112,11 +138,15 @@ MAX_LINES=$(GetMaxLines)
 { kill %1 && wait %1; } 2>/dev/null
 echo -e "\b...done."
 
-ClearFileHistory
-
 echo -n "Starting visualization"
 GenerateWatchPanes $MAX_LINES
 echo "...done."
+# Fun little countdown. Entirely unecessary.
+for (( i=1; i<=3; i++ )); do echo -n "$i.."; sleep 1; done
+echo "starting."
+ReplayHistory
+
+ClearFileHistory
 
 
 ### Example script to spawn new terminal and do something
