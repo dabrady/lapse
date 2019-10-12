@@ -23,11 +23,11 @@ function WaitFor() {
     MakeTheUserWait &
     local waitPID=$!
 
-    RESULT=$($@)
+    local result=$($@)
 
     { kill $waitPID && wait $waitPID; } 2>/dev/null
 
-    echo -n "$RESULT"
+    echo "$result"
 }
 
 function GenerateFileHistory() {
@@ -46,7 +46,7 @@ function GetMaxLines() {
         # exists on that commit -_-; they also result in a new file that we need to start tracking.
         # Gotta guard against it.
         [ -e $filename ] || git checkout $sha $filename 2>/dev/null || continue
-        cur=$(((git show $sha:$filename 2>/dev/null || echo 0) | wc -l) | tr -d '[:space:]')
+        local cur=$(((git show $sha:$filename 2>/dev/null || echo 0) | wc -l) | tr -d '[:space:]')
         if [ "$cur" -gt "$max" ]; then
             max=$cur
         fi
@@ -55,56 +55,69 @@ function GetMaxLines() {
     echo $max
 }
 
-function CalculateNumberOfPanesNeeded() {
-    LINE_COUNT="$1"
-    [ -z "$LINE_COUNT" ] && echo "error: no line count given" && exit 1
-
-    echo 3
-}
-
 function GenerateWatchPanes() {
-    NUM_PANES="$1"
-    [ -z "$NUM_PANES" ] && echo "error: give me a number" && exit 1
+    local fileLineCount="$1"
+    [ -z "$fileLineCount" ] && echo "error: give me the longest line count of the file to watch" && exit 1
 
-    # TODO Update with actual watch command
-    COMMAND="PS1=;echo Pane no."
-
-    osascript <<END
-tell application "iTerm2"
     # Create the visualization window.
     # NOTE This profile must exist: it determines the look-and-feel of our
     # visualization, particularly the font size. My preference is a profile
     # with tiny font (size 2).
-    select (create window with profile "TINY")
+    osascript -e 'tell application "iTerm2" to select (create window with profile "TINY")'
 
-    # Generate enough panes to visualize the TARGET_FILE at its longest.
+    # NOTE Need to run this in the visualization window since the display might be different from the one that executed this program.
+    local visibleLineCount=$(osascript -e 'tell application "iTerm2" to tell current session of current window to return ""&rows')
+    [ -z "$visibleLineCount" ] && echo "error: could not get visible line count" && osascript -e 'tell application "iTerm2" to tell current window to close' && exit 1
+
+    # Divide the number of lines we need to show by the number of visible lines on the screen,
+    # rounding up to the nearest whole number.
+    local numPanes=$(( ( visibleLineCount - 1 + fileLineCount ) / visibleLineCount))
+
+    # Turn off shell wildcard/"glob" expansion; needed because of the use of '*' in the lines below :P
+    set -f
+    for (( i=1; i<="$numPanes"; i++ )); do
+        # This identifies the first line of the file that will be watched for the current pane.
+        # It's 1 for the first pane, and a multiple of the visible number of lines for the rest.
+        # NOTE We can use the shell variable `LINES` in the final command, since it will be executed in the shell itself.
+        local startingLine=$([ 1 == "$i" ] && echo "1" || echo "\$((LINES * ($i - 1)))")
+
+        # So. Many. Escapes. Took me over an hour to get this to compile. >.<
+        local command="cd $TARGET_PROJECT; watch -tn 0.1 -d \\\"sed -n \\\\\\\"$startingLine,\$((LINES * $i))p;\$((LINES * $i))q\\\\\\\" $TARGET_FILE | cut -c -\${COLUMNS}\\\""
+        osascript <<END
+tell application "iTerm2"
     tell current session of current window
-        set i to 1
-        write text "$COMMAND"&i
-        repeat with i from 2 to $NUM_PANES
-            tell (split vertically with same profile)
-                select
-                write text "$COMMAND "&i
-            end tell
-        end repeat
+        set command to "$command"
+        write text command
+
+        # When we've reached the last pane, don't spawn another one.
+        if $i is not $numPanes then
+           tell (split vertically with same profile) to select
+        end if
     end tell
 end tell
 END
+    done
+    # Turn shell wildcard expansion back on
+    set +f
 }
 
-echo -n "Generating file history..."
-WaitFor GenerateFileHistory
-echo "done."
+echo -n "Generating file history "
+MakeTheUserWait &
+GenerateFileHistory && { kill %1 && wait %1; } 2>/dev/null
+echo -e "\b...done."
 
-echo -n "Calculating maximum line count of file..."
-MAX_LINES=5 #$(WaitFor GetMaxLines)
+echo -n "Calculating maximum line count of file "
+MakeTheUserWait &
+MAX_LINES=$(GetMaxLines)
+{ kill %1 && wait %1; } 2>/dev/null
+echo -e "\b...done."
 
-echo "done. Max length is $MAX_LINES lines."
 ClearFileHistory
 
-NUM_PANES=$(CalculateNumberOfPanesNeeded $MAX_LINES)
+echo -n "Starting visualization"
+GenerateWatchPanes $MAX_LINES
+echo "...done."
 
-GenerateWatchPanes $NUM_PANES
 
 ### Example script to spawn new terminal and do something
 # osascript <<ENDSCRIPT
