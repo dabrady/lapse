@@ -19,6 +19,17 @@ function MakeTheUserWait() {
     done
 }
 
+function WaitFor() {
+    MakeTheUserWait &
+    local waitPID=$!
+
+    RESULT=$($@)
+
+    { kill $waitPID && wait $waitPID; } 2>/dev/null
+
+    echo -n "$RESULT"
+}
+
 function GenerateFileHistory() {
     git log --follow --format=format:%h --name-only $TARGET_REVISION_RANGE -- $TARGET_FILE | gsed -r '/^\s*$/d' > $HISTORY
 }
@@ -45,23 +56,13 @@ function GetMaxLines() {
 }
 
 echo -n "Generating file history..."
-MakeTheUserWait &
-WAIT_PID=$!
+WaitFor GenerateFileHistory
+echo "done."
 
-GenerateFileHistory
-
-{ kill $WAIT_PID && wait $WAIT_PID; } 2>/dev/null
-
-echo -e "done."
 echo -n "Calculating maximum line count of file..."
-MakeTheUserWait &
-WAIT_PID=$!
+MAX_LINES=$(WaitFor GetMaxLines)
 
-MAX_LINES=$(GetMaxLines)
-
-{ kill $WAIT_PID && wait $WAIT_PID; } 2>/dev/null
-
-echo -e "done. Max length is $MAX_LINES lines."
+echo "done. Max length is $MAX_LINES lines."
 ClearFileHistory
 
 ### Example script to spawn new terminal and do something
