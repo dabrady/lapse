@@ -55,15 +55,56 @@ function GetMaxLines() {
     echo $max
 }
 
+function CalculateNumberOfPanesNeeded() {
+    LINE_COUNT="$1"
+    [ -z "$LINE_COUNT" ] && echo "error: no line count given" && exit 1
+
+    echo 3
+}
+
+function GenerateWatchPanes() {
+    NUM_PANES="$1"
+    [ -z "$NUM_PANES" ] && echo "error: give me a number" && exit 1
+
+    # TODO Update with actual watch command
+    COMMAND="PS1=;echo Pane no."
+
+    osascript <<END
+tell application "iTerm2"
+    # Create the visualization window.
+    # NOTE This profile must exist: it determines the look-and-feel of our
+    # visualization, particularly the font size. My preference is a profile
+    # with tiny font (size 2).
+    select (create window with profile "TINY")
+
+    # Generate enough panes to visualize the TARGET_FILE at its longest.
+    tell current session of current window
+        set i to 1
+        write text "$COMMAND"&i
+        repeat with i from 2 to $NUM_PANES
+            tell (split vertically with same profile)
+                select
+                write text "$COMMAND "&i
+            end tell
+        end repeat
+    end tell
+end tell
+END
+}
+
 echo -n "Generating file history..."
 WaitFor GenerateFileHistory
 echo "done."
 
 echo -n "Calculating maximum line count of file..."
-MAX_LINES=$(WaitFor GetMaxLines)
+MAX_LINES=5 #$(WaitFor GetMaxLines)
 
 echo "done. Max length is $MAX_LINES lines."
 ClearFileHistory
+
+NUM_PANES=$(CalculateNumberOfPanesNeeded $MAX_LINES)
+
+GenerateWatchPanes $NUM_PANES
 
 ### Example script to spawn new terminal and do something
 # osascript <<ENDSCRIPT
