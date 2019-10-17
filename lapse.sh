@@ -3,12 +3,10 @@
 # TARGET_PROJECT=
 # TARGET_FILE=$2
 TARGET_REVISION_RANGE=${TARGET_REVISION_RANGE:-master}
-HISTORY="$PWD/tmp.hist"
+HISTORY=./tmp.hist
 
 [ -z "$TARGET_PROJECT" ] && echo "Missing TARGET_PROJECT" && exit 1
 [ -z "$TARGET_FILE" ] && echo "Missing TARGET_FILE" && exit 1
-
-pushd "$TARGET_PROJECT" >/dev/null
 
 function MakeTheUserWait() {
     while :; do
@@ -31,27 +29,57 @@ function WaitFor() {
 }
 
 function GenerateFileHistory() {
-    # TODO Use '--name-status' instead of '--name-only' and add some parsing to handle file renames
-    git log --follow --format=format:%h --name-only $TARGET_REVISION_RANGE -- $TARGET_FILE | tail -r | gsed -r '/^\s*$/d' > $HISTORY
+    git -C $TARGET_PROJECT log --follow --pretty=format:%h --name-status $TARGET_REVISION_RANGE -- $TARGET_FILE | tail -r | gsed -r '/^\s*$/d' > $HISTORY
 }
 
 function ClearFileHistory() {
     [ -e "$HISTORY" ] && rm "$HISTORY"
 }
 
+function WalkHistory() {
+    local mode filenames sha
+    while read -r mode filenames; do
+        read -r sha
+
+        if [[ "$mode" == D* ]]; then
+            # The file was deleted in this commit, which means (because of how
+            # the history was gathered) the next commit will have a 'rename'.
+            # So we skip this commit.
+            continue;
+        fi
+
+        # Thanks to the way we've gathered our history, we might have one or two
+        # names listed for our target file due to renames. This breaks them into
+        # separate variables for easy consumption.
+        local oldFilename newFilename targetFilename
+        read -r oldFilename newFilename <<< $filenames
+
+        # For normal modifications, we'll only have the "old filename". But for
+        # renames, we'll have both, and we care about the new name.
+        if [[ -z "$newFilename" ]]; then
+            targetFilename="$oldFilename"
+        else
+            targetFilename="$newFilename"
+        fi
+
+        # Execute given commands
+        $@ $sha $targetFilename
+    done <<< "$(cat "$HISTORY")"
+}
+
 function GetMaxLines() {
     [ -e "$HISTORY" ] || (echo "no history yet" && exit 1)
-    max=0
-    while read filename sha; do
-        # File renames result in a commit that touched the file, but in a file that no longer
-        # exists on that commit -_-; they also result in a new file that we need to start tracking.
-        # Gotta guard against it.
-        [ -e $filename ] || git checkout $sha $filename 2>/dev/null || continue
-        local cur=$(((git show $sha:$filename 2>/dev/null || echo 0) | wc -l) | tr -d '[:space:]')
+    local max=0
+    function updateMax() {
+        local sha="$1"
+        local file="$2"
+        local cur=$(((git -C $TARGET_PROJECT show $sha:$file 2>/dev/null || echo 0) | wc -l) | tr -d '[:space:]')
         if [ "$cur" -gt "$max" ]; then
             max=$cur
         fi
-    done <<< "$(cat "$HISTORY" | xargs -n2)"
+    }
+
+    WalkHistory updateMax
 
     echo $max
 }
@@ -103,22 +131,14 @@ END
 }
 
 function ReplayHistory() {
-    # Used to keep track of file renames
-    local previousFilename=
-    while read file sha; do
-        # TODO Figure out a way to handle file renames. Something like this:
+    function replayCommit() {
+        local sha="$1"
+        local file="$2"
+        git -C $TARGET_PROJECT checkout $sha $file
+    }
 
-        # If we come across a commit in our file history that doesn't actually
-        # contain the file, either we fucked up our history gathering, or the
-        # file was renamed in this commit.
-        # if [[ -e "$file" ]]; then
-            git checkout $sha $file
-        # else
-        #     git checkout $sha $previousFilename
-        # fi
-
-        previousFilename="$file"
-    done <<< "$(cat "$HISTORY" | xargs -n2)"
+    # Time travel.
+    WalkHistory replayCommit
 
     # Give the user a bit of time to breathe at the end before resetting.
     sleep 2
@@ -141,34 +161,12 @@ echo -e "\b...done."
 echo -n "Starting visualization"
 GenerateWatchPanes $MAX_LINES
 echo "...done."
+
 # Fun little countdown. Entirely unecessary.
 for (( i=1; i<=3; i++ )); do echo -n "$i.."; sleep 1; done
 echo "starting."
 ReplayHistory
 
 ClearFileHistory
-
-
-### Example script to spawn new terminal and do something
-# osascript <<ENDSCRIPT
-# tell application "iTerm2"
-#   tell current window
-#     select (create tab with profile "sidebar")
-#     tell current session of current tab
-#       tell (split vertically with same profile)
-#          write text "echo Hello"
-#       end tell
-#     end tell
-#   end tell
-# end tell
-# ENDSCRIPT
-
-### Replay file history
-# for sha in $(git log --oneline --reverse --format=format:%H $TARGET_REVISION_RANGE -- $TARGET_FILE); do
-#    git show $sha:$file > $OUTPUT
-#    sleep 0.2
-# done
-
-# git checkout master
-
-popd >/dev/null
+## TODO Return focus to main terminal.
+echo "Visualization complete."
