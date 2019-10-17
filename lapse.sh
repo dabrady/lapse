@@ -1,12 +1,16 @@
 #! /bin/bash
 
 # TARGET_PROJECT=
-# TARGET_FILE=$2
+# TARGET_FILE=
+# SPEED=
 TARGET_REVISION_RANGE=${TARGET_REVISION_RANGE:-master}
-HISTORY=./tmp.hist
+SPEED=${SPEED:-0.2}
+HISTORY="$PWD/tmp.hist"
+OUTPUT="$PWD/tmp.out"
 
 [ -z "$TARGET_PROJECT" ] && echo "Missing TARGET_PROJECT" && exit 1
 [ -z "$TARGET_FILE" ] && echo "Missing TARGET_FILE" && exit 1
+[ ! -z "$(git -C $TARGET_PROJECT status --porcelain)" ] && echo "Target project not clean, bailing" && exit 1
 
 function MakeTheUserWait() {
     while :; do
@@ -32,8 +36,9 @@ function GenerateFileHistory() {
     git -C $TARGET_PROJECT log --follow --pretty=format:%h --name-status $TARGET_REVISION_RANGE -- $TARGET_FILE | tail -r | gsed -r '/^\s*$/d' > $HISTORY
 }
 
-function ClearFileHistory() {
+function Cleanup() {
     [ -e "$HISTORY" ] && rm "$HISTORY"
+    [ -e "$OUTPUT" ] && rm "$OUTPUT"
 }
 
 function WalkHistory() {
@@ -111,7 +116,7 @@ function GenerateWatchPanes() {
         local startingLine=$([ 1 == "$i" ] && echo "1" || echo "\$((LINES * ($i - 1)))")
 
         # So. Many. Escapes. Took me over an hour to get this to compile. >.<
-        local command="cd $TARGET_PROJECT; watch -tn 0.1 -d \\\"sed -n \\\\\\\"$startingLine,\$((LINES * $i))p;\$((LINES * $i))q\\\\\\\" $TARGET_FILE | cut -c -\${COLUMNS}\\\""
+        local command="watch -tn 0.1 -d \\\"sed -n \\\\\\\"$startingLine,\$((LINES * $i))p;\$((LINES * $i))q\\\\\\\" $OUTPUT | cut -c -\${COLUMNS}\\\""
         osascript <<END
 tell application "iTerm2"
     tell current session of current window
@@ -119,7 +124,12 @@ tell application "iTerm2"
         write text command
 
         # When we've reached the last pane, don't spawn another one.
-        if $i is not $numPanes then
+        if $i is $numPanes then
+           repeat
+               delay 1
+               if not (is processing) then exit repeat
+           end repeat
+        else
            tell (split vertically with same profile) to select
         end if
     end tell
@@ -134,17 +144,19 @@ function ReplayHistory() {
     function replayCommit() {
         local sha="$1"
         local file="$2"
-        git -C $TARGET_PROJECT checkout $sha $file
+        git -C $TARGET_PROJECT show $sha:$file > $OUTPUT
+        sleep $SPEED
     }
 
     # Time travel.
+    touch $OUTPUT
     WalkHistory replayCommit
 
     # Give the user a bit of time to breathe at the end before resetting.
     sleep 2
 
-    git checkout master
-    git reset --hard origin/master
+    git -C $TARGET_PROJECT checkout master >/dev/null
+    git -C $TARGET_PROJECT reset --hard origin/master >/dev/null
 }
 
 echo -n "Generating file history "
@@ -167,6 +179,6 @@ for (( i=1; i<=3; i++ )); do echo -n "$i.."; sleep 1; done
 echo "starting."
 ReplayHistory
 
-ClearFileHistory
+Cleanup
 ## TODO Return focus to main terminal.
 echo "Visualization complete."
