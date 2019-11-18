@@ -1,8 +1,20 @@
 #! /bin/bash
-
-# TARGET_PROJECT=
-# TARGET_FILE=
-# SPEED=
+##
+# Example usage:
+#     TARGET_PROJECT=~/github/cool_project TARGET_FILE=app/models/cool_model.rb SPEED=0.05 ./lapse.sh
+#
+# Required arguments:
+#     TARGET_PROJECT - a path (relative or absolute) to the base Git repository of TARGET_FILE
+#        TARGET_FILE - a path (relative to TARGET_PROJECT, or absolute) to the file to visualize
+#
+# Optional arguments:
+#     TARGET_REVISION_RANGE - [default: "master"] a Git revision range (following the format accepted
+#                             by `git log`) indicating the slice of project history to visualize;
+#                             specifying a single commit or branch name implicitly indicates the
+#                             beginning of the range is the first reachable commit containing TARGET_FILE
+#                     SPEED - [default: 0.2] a numeric value (floating point accepted) measuring the
+#                             desired time in seconds between each "frame" of the visualization
+##
 TARGET_REVISION_RANGE=${TARGET_REVISION_RANGE:-master}
 SPEED=${SPEED:-0.2}
 HISTORY="$PWD/tmp.hist"
