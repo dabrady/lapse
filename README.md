@@ -12,7 +12,7 @@ It wasn't long before I realized that, given the history of transformations appl
 
 ![Visualization of the evolution of a very large, very old text file](readme_assets/evolution.gif)
 
-I've used a combination of readily available command-line tools such as `git`, `watch`,  and `sed`, in conjunction with some features of the `iTerm2** terminal application, to achieve this.
+I've used a combination of readily available command-line tools such as `git`, `watch`,  and `sed`, in conjunction with some features of the `iTerm2` terminal application, to achieve this.
 
 I think the results are slightly beautiful.
 
